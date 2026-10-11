@@ -518,8 +518,9 @@ Column {
                 anchors { left: parent.left; leftMargin: Style.spacing.md + Style.space(10); verticalCenter: parent.verticalCenter }
                 width: Math.min(implicitWidth, Style.space(200))
                 elide: Text.ElideRight
-                text: modelData.cls + (modelData.title ? " \u00b7 " + modelData.title : "")
-                  + (modelData.status === "shadowed" ? "  (rule " + (modelData.by + 1) + ")" : "")
+                text: (modelData.status === "shadowed" ? "rule " + (modelData.by + 1) + " \u00b7 "
+                    : modelData.status === "explicit" ? "own \u00b7 " : "")
+                  + modelData.cls + (modelData.title ? " \u00b7 " + modelData.title : "")
                 color: ed.fg
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption

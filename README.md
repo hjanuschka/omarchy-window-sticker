@@ -9,6 +9,10 @@ Stickers follow their window, hide when it is minimized, on another
 workspace, behind the screensaver or covered by a fullscreen app, and
 disappear when the window closes.
 
+![Five windows with a banner, flag, wax seal, washi tape and luggage tag sticker](docs/hero.png)
+
+![The five sticker styles up close](docs/styles.png)
+
 ## Install
 
 Requires Omarchy with the Quickshell-based `omarchy-shell`.
@@ -41,6 +45,8 @@ omarchy plugin update io.github.hjanuschka.window-sticker
 Focus a window and press **Super+Shift+R**. The picker shows a live
 preview of that window with the sticker on it.
 
+<p align="center"><img src="docs/picker.png" width="420" alt="The sticker picker with live preview, presets, look options, rules and stickered windows"></p>
+
 | Action | How |
 |---|---|
 | Add / edit a sticker | type a label (or click a preset), pick color, style, corner, `Enter` |
@@ -56,6 +62,8 @@ Presets: `PROD`, `DRAFT`, `WIP`, `TODO`, `KEEP` (DO NOT CLOSE), `REVIEW`.
 Rules sticker windows automatically, e.g. every kitty whose title has
 `prod`. In the picker under **Rules**, click **+ New rule** (or a rule
 row to edit it):
+
+<p align="center"><img src="docs/rules.png" width="560" alt="Rule editor showing conditions, suggestions and which open windows the rule matches"></p>
 
 - **App** and **Window title** conditions, each `is` / `has` / `starts` /
   `regex`. Regex errors are shown inline.
