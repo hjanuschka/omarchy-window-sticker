@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -18,10 +17,9 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property real ribW: 34
-  readonly property real ribH: 122
-  readonly property real ribNotch: 14
-  readonly property real rightInset: 26
+  readonly property real cornerSize: 110
+  readonly property real bandT: 22
+  readonly property real cut: 48
   readonly property int syncInterval: 120
 
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME")
@@ -180,7 +178,7 @@ Item {
       }
       var scr = screenByName(monName)
       if (scr && win.screen !== scr) win.screen = scr
-      win.targetX = at[0] + size[0] - root.ribW - root.rightInset
+      win.targetX = at[0] + size[0] - root.cornerSize
       win.targetY = at[1] - (reservedTopByMonId[monId] || 0)
       win.ribbonText = st.text || ""
       win.visible = true
@@ -206,39 +204,37 @@ Item {
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
       color: "transparent"
-      implicitWidth: root.ribW
-      implicitHeight: root.ribH
+      implicitWidth: root.cornerSize
+      implicitHeight: root.cornerSize
       anchors { top: true; left: true }
       margins { left: Math.round(targetX); top: Math.round(targetY) }
 
-      Shape {
+      Item {
         anchors.fill: parent
-        antialiasing: true
-        ShapePath {
-          fillColor: Color.accent
-          strokeColor: Qt.darker(Color.accent, 1.35)
-          strokeWidth: 1
-          joinStyle: ShapePath.MiterJoin
-          startX: 0; startY: 0
-          PathLine { x: root.ribW; y: 0 }
-          PathLine { x: root.ribW; y: root.ribH }
-          PathLine { x: root.ribW / 2; y: root.ribH - root.ribNotch }
-          PathLine { x: 0; y: root.ribH }
-        }
-      }
+        clip: true
 
-      Text {
-        width: root.ribH - root.ribNotch - 16
-        height: root.ribW
-        anchors.centerIn: parent
-        rotation: 90
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
-        color: root.ribbonFg
-        font.pixelSize: 13
-        font.bold: true
-        text: rib.ribbonText
+        Rectangle {
+          id: band
+          width: root.cornerSize * 1.6
+          height: root.bandT
+          x: root.cornerSize - root.cut / 2 - width / 2
+          y: root.cut / 2 - height / 2
+          rotation: 45
+          color: Color.accent
+
+          Text {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideMiddle
+            color: root.ribbonFg
+            font.pixelSize: 11
+            font.bold: true
+            text: rib.ribbonText
+          }
+        }
       }
     }
   }
