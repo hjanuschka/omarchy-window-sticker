@@ -1,22 +1,55 @@
 # Window Sticker
 
-Book-ribbon project labels pinned to window corners on Omarchy.
+Pin a labelled sticker to any window on [Omarchy](https://omarchy.org/):
+a diagonal banner, bookmark flag, wax seal, washi tape or luggage tag in
+the corner of your choice. Mark windows like "Project X", "PROD" or
+"DO NOT CLOSE" and tell them apart at a glance.
 
-Focus a window, hit **Super+Shift+R**, type a label ("Project X"), Enter --
-a ribbon hangs from the window's top-right corner. It follows the window
-around, hides when the window is minimized / on another workspace /
-fullscreen, and disappears when the window closes.
+Stickers follow their window, hide when it is minimized, on another
+workspace, behind the screensaver or covered by a fullscreen app, and
+disappear when the window closes.
+
+## Install
+
+Requires Omarchy with the Quickshell-based `omarchy-shell`.
+
+```bash
+omarchy plugin add https://github.com/hjanuschka/omarchy-window-sticker --enable
+~/.config/omarchy/plugins/io.github.hjanuschka.window-sticker/install.sh
+```
+
+The first command clones, validates and enables the plugin. The second
+binds **Super+Shift+R** (in `~/.config/hypr/bindings.lua`) and is safe to
+re-run. If Super+Shift+R is taken on your setup, change that line in
+`bindings.lua` to a free key.
+
+Enabling also offers to place the optional bar widget (🏷️ + sticker
+count, click for the overview). To add it later:
+
+```bash
+omarchy bar put io.github.hjanuschka.window-sticker --section right
+```
+
+## Update
+
+```bash
+omarchy plugin update io.github.hjanuschka.window-sticker
+```
 
 ## Usage
 
+Focus a window and press **Super+Shift+R**. The picker shows a live
+preview of that window with the sticker on it.
+
 | Action | How |
 |---|---|
-| Add / edit sticker | `Super+Shift+R`, type label, `Enter` |
-| Remove sticker | `Super+Shift+R` on a stickered window, click **Remove** |
-| Cancel | `Esc` |
+| Add / edit a sticker | type a label (or click a preset), pick color, style, corner, `Enter` |
+| Emoji in the label | 😀 button next to the label field |
+| Remove a sticker | **Remove** next to the label, or **×** in *Stickered windows* |
+| Jump to a stickered window | click it under *Stickered windows* |
+| Close | `Esc` |
 
-Re-applying the shortcut on a window that already has a sticker opens the
-picker with the current text prefilled.
+Presets: `PROD`, `DRAFT`, `WIP`, `TODO`, `KEEP` (DO NOT CLOSE), `REVIEW`.
 
 ## Rules
 
@@ -36,46 +69,54 @@ row to edit it):
 The list shows what each rule currently does ("on 3 open windows",
 "never applies — rule 1 wins"), with priority arrows (first match wins),
 a pause toggle, and delete. A window's own sticker always beats rules.
-Rules live in `~/.local/state/omarchy-window-sticker/rules.json`.
 
-## How it works
+## Data
 
-- Omarchy shell plugin (`keepLoaded` overlay). The picker captures the
-  focused window via `hyprctl activewindow` before it takes keyboard
-  focus.
-- Each sticker is its own small layer surface
-  (`omarchy-window-sticker` namespace) pinned to the target window's
-  top-right corner; only the ribbon rectangle itself is ever covered.
-- A 120 ms sync loop (plus Hyprland `rawEvent` wakeups) re-reads
-  `hyprctl clients/monitors` and moves/hides ribbons. The loop only runs
-  while at least one sticker exists.
-- Stickers persist in `~/.local/state/omarchy-window-sticker/stickers.json`
-  keyed by window address, so they survive shell restarts within a
-  Hyprland session. Closing a window removes its sticker.
+Everything lives in `~/.local/state/omarchy-window-sticker/`:
 
-## Install
+- `stickers.json`: per-window stickers, keyed by window address. They
+  survive shell restarts but not a new Hyprland session (windows get new
+  addresses). Use rules for anything that should come back.
+- `rules.json`: your rules.
+
+Remove all per-window stickers:
 
 ```bash
-./install.sh
-```
-
-Links the plugin into `~/.config/omarchy/plugins/`, enables it in
-`shell.json`, and adds the keybinding + layer rule to
-`~/.config/hypr/bindings.lua`. Idempotent.
-
-## CLI
-
-```bash
-# remove all stickers
 omarchy-shell shell call io.github.hjanuschka.window-sticker clearAll '{}'
 ```
 
 ## Uninstall
 
 ```bash
-rm ~/.config/omarchy/plugins/io.github.hjanuschka.window-sticker
-# remove the "Window sticker" lines from ~/.config/hypr/bindings.lua and
-# the plugin entry from ~/.config/omarchy/shell.json, then:
-omarchy restart shell
-rm -r ~/.local/state/omarchy-window-sticker
+~/.config/omarchy/plugins/io.github.hjanuschka.window-sticker/uninstall.sh
+omarchy plugin remove io.github.hjanuschka.window-sticker
+rm -r ~/.local/state/omarchy-window-sticker   # optional: drop stickers and rules
 ```
+
+`uninstall.sh` removes the keybinding (keeping a backup of
+`bindings.lua`) and disables the plugin.
+
+## How it works
+
+- Omarchy shell plugin (`keepLoaded` overlay plus an optional bar
+  widget). The picker reads the focused window with
+  `hyprctl activewindow` before it takes keyboard focus.
+- Each sticker is a small layer surface (`omarchy-window-sticker`
+  namespace) pinned to a corner of its window; only the sticker area is
+  ever covered.
+- A 120 ms sync loop, woken early by Hyprland events, re-reads
+  `hyprctl clients` / `monitors` and moves or hides stickers. It only runs
+  while stickers or rules exist, or the picker is open.
+- The preview uses Quickshell's `ScreencopyView` on the target window.
+
+## Development
+
+```bash
+git clone https://github.com/hjanuschka/omarchy-window-sticker
+cd omarchy-window-sticker && ./install.sh   # symlinks the checkout into the plugins dir
+omarchy restart shell                       # after QML edits
+```
+
+## License
+
+MIT
