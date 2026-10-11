@@ -3,7 +3,10 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
+import QtQuick.Layouts
 import qs.Commons
+import qs.Ui
+import "RuleLogic.js" as RL
 
 // Sticker overlays for Hyprland windows. Each sticker is a small layer
 // surface pinned to one corner of its target window and rendered by
@@ -73,6 +76,7 @@ Item {
   property string targetLabel: ""
   property string targetMonitor: ""
   property bool emojiOpen: false
+  property var targetClient: null
 
   // Composer selection.
   property string selectedColor: "accent"
@@ -154,7 +158,7 @@ Item {
     interval: root.syncInterval
     repeat: true
     triggeredOnStart: true
-    running: Object.keys(root.stickers).length > 0 || root.rules.length > 0
+    running: root.pickerVisible || Object.keys(root.stickers).length > 0 || root.rules.length > 0
     onTriggered: if (!syncProc.running) syncProc.running = true
   }
 
@@ -188,26 +192,7 @@ Item {
     return null
   }
 
-  function classOf(c) {
-    if (!c) return ""
-    if (c.class && typeof c.class === "object")
-      return String(c.class.initial || c.class.class || "")
-    return String(c.class || "")
-  }
-
-  function matchRule(rule, c) {
-    try {
-      if (rule.classRe) {
-        if (!new RegExp(rule.classRe, "i").test(classOf(c))) return false
-      }
-      if (rule.titleRe) {
-        if (!new RegExp(rule.titleRe, "i").test(String(c.title || ""))) return false
-      }
-      return true
-    } catch (e) {
-      return false
-    }
-  }
+  function classOf(c) { return RL.classOf(c) }
 
   function applySync(raw) {
     var parts = String(raw).split("###MON###")
@@ -253,7 +238,7 @@ Item {
       var c = clients[ri]
       if (effective[c.address]) continue
       for (var r = 0; r < root.rules.length; r++) {
-        if (matchRule(root.rules[r], c)) {
+        if (RL.matches(root.rules[r], c)) {
           effective[c.address] = root.rules[r]
           break
         }
@@ -406,12 +391,15 @@ Item {
     if (!w || !w.address) {
       // No focused window: still open in overview mode.
       root.targetAddr = ""
+      root.targetClient = null
       root.targetClass = ""
       root.targetLabel = ""
       root.pickerVisible = true
+      Qt.callLater(function() { pickerScroll.forceActiveFocus() })
       return
     }
     root.targetAddr = w.address
+    root.targetClient = w
     root.targetClass = classOf(w)
     root.targetLabel = root.targetClass
       + (w.title ? " \u2014 " + w.title : "")
@@ -427,6 +415,7 @@ Item {
       pickerInput.text = ""
     }
     root.emojiOpen = false
+    rulesEditor.cancel()
     root.pickerVisible = true
     Qt.callLater(function() { pickerInput.forceActiveFocus() })
   }
@@ -486,22 +475,48 @@ Item {
     pickerInput.forceActiveFocus()
   }
 
-  function addRuleFromCurrent() {
-    var t = (pickerInput.text || "").trim()
-    if (!t || !root.targetClass) return
-    var next = []
-    for (var i = 0; i < root.rules.length; i++) next.push(root.rules[i])
-    next.push({
-      classRe: "^" + root.targetClass + "$",
-      titleRe: "",
-      text: t,
-      color: root.selectedColor,
-      corner: root.selectedCorner,
-      style: root.selectedStyle,
-      glow: root.selectedGlow
-    })
+  function replaceRules(next) {
     root.rules = next
     root.saveRules()
+  }
+
+  function commitRule(index, rule) {
+    var next = root.rules.slice()
+    if (index >= 0 && index < next.length) next[index] = rule
+    else next.push(rule)
+    replaceRules(next)
+  }
+
+  function removeRule(index) {
+    var next = root.rules.slice()
+    next.splice(index, 1)
+    replaceRules(next)
+  }
+
+  function moveRule(index, delta) {
+    var to = index + delta
+    if (to < 0 || to >= root.rules.length) return
+    var next = root.rules.slice()
+    var r = next[index]
+    next[index] = next[to]
+    next[to] = r
+    replaceRules(next)
+  }
+
+  function setRuleEnabled(index, enabled) {
+    var next = root.rules.slice()
+    var r = Object.assign({}, next[index])
+    r.enabled = enabled
+    next[index] = r
+    replaceRules(next)
+  }
+
+  function loadRuleLook(rule) {
+    pickerInput.text = rule.text || ""
+    root.selectedColor = rule.color || "accent"
+    root.selectedCorner = rule.corner || "tr"
+    root.selectedStyle = rule.style || "banner"
+    root.selectedGlow = rule.glow === true
   }
 
   function clearAll() {
@@ -516,488 +531,479 @@ Item {
 
   // ---------------------------------------------------------- picker UI
 
+  // Selectable tile used by the style and corner pickers.
+  component Tile: Rectangle {
+    id: tile
+    property bool selected: false
+    signal clicked()
+    radius: Style.cornerRadius
+    color: selected ? Style.selectedFillFor(Color.menu.text, Color.accent)
+      : tileArea.containsMouse ? Style.hoverFillFor(Color.menu.text, Color.accent)
+      : Style.normalFillFor(Color.menu.text, Color.accent)
+    border.width: 1
+    border.color: selected ? Color.accent : Util.alpha(Color.menu.text, Style.normalBorderAlpha * 0.5)
+    Behavior on color { ColorAnimation { duration: 120 } }
+    MouseArea {
+      id: tileArea
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: tile.clicked()
+    }
+  }
+
+  component RowLabel: Text {
+    color: Color.muted
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+    font.bold: true
+  }
+
   PanelWindow {
     id: picker
+
+    readonly property color fg: Color.menu.text
+    readonly property int pad: Style.spacing.panelPadding
+
     WlrLayershell.namespace: "omarchy-window-sticker-picker"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore
     focusable: true
     color: "transparent"
     visible: root.pickerVisible
-    implicitWidth: 480
-    implicitHeight: Math.min(screen ? screen.height - 80 : 700, pickerCol.implicitHeight + 28)
+    implicitWidth: Style.space(540)
+    implicitHeight: Math.min(screen ? screen.height - Style.space(80) : 700,
+      pickerCol.implicitHeight + pad * 2)
     screen: screenByName(root.targetMonitor) || Quickshell.screens[0] || null
     anchors { top: true; left: true }
     margins {
       left: screen ? Math.round((screen.width - width) / 2) : 0
-      top: screen ? Math.max(0, Math.round((screen.height - height) / 2 - 60)) : 0
+      top: screen ? Math.max(0, Math.round((screen.height - height) / 2)) : 0
     }
 
-    Rectangle {
+    BorderSurface {
       anchors.fill: parent
-      radius: 14
+      radius: Style.cornerRadius
       color: Color.menu.background
-      border.color: Color.menu.border
-      border.width: 1
+      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
     }
 
-    Column {
-      id: pickerCol
-      anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
-      spacing: 10
+    Flickable {
+      id: pickerScroll
+      anchors { fill: parent; margins: picker.pad }
+      contentHeight: pickerCol.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      Keys.onEscapePressed: root.close()
 
-      // Target label.
-      Text {
-        width: parent.width
-        elide: Text.ElideMiddle
-        text: root.targetLabel ? "Sticker for: " + root.targetLabel : "No focused window (overview only)"
-        color: Color.menu.text
-        opacity: 0.7
-        font.pixelSize: 11
-      }
+      Column {
+        id: pickerCol
+        width: pickerScroll.width
+        spacing: Style.spacing.panelGap
 
-      // Live preview: a fake window with the sticker drawn in the chosen corner.
-      Rectangle {
-        visible: root.targetAddr !== ""
-        width: parent.width
-        height: 120
-        radius: 10
-        color: Qt.darker(Color.menu.background, 1.4)
-        border.color: Color.menu.border
-        border.width: 1
-        clip: true
-
-        Rectangle {
-          anchors.centerIn: parent
-          width: Math.min(parent.width - 24, 260)
-          height: Math.min(parent.height - 24, 96)
-          radius: 6
-          color: Qt.lighter(Color.menu.background, 1.08)
-          border.color: Qt.tint(Color.menu.text, "#30000000")
-          border.width: 1
-
-          // Fake titlebar hints
-          Row {
-            x: 8; y: 7
-            spacing: 5
-            Repeater {
-              model: 3
-              Rectangle { width: 7; height: 7; radius: 3.5; opacity: 0.5
-                color: [ "#e5484d", "#ffb224", "#30a46c" ][index] }
-            }
-          }
-
-          StickerArt {
-            anchors.fill: parent
-            stickerText: pickerInput.text || "Preview"
-            bandColor: root.resolveColor(root.selectedColor)
-            stickerStyle: root.selectedStyle
-            corner: root.selectedCorner
-          }
-        }
-      }
-
-      // Preset chips.
-      Flow {
-        visible: root.targetAddr !== ""
-        width: parent.width
-        spacing: 6
-        Repeater {
-          model: root.presets
-          delegate: Rectangle {
-            required property var modelData
-            height: 24
-            width: presetLabel.width + 18
-            radius: 12
-            color: presetArea.containsMouse
-              ? Qt.lighter(Color.menu.background, 1.2)
-              : Qt.darker(Color.menu.background, 1.1)
-            border.color: Color.menu.border
-
-            Rectangle {
-              anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 6 }
-              width: 8; height: 8; radius: 4
-              color: root.resolveColor(modelData.color)
-            }
-            Text {
-              id: presetLabel
-              anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 18 }
-              text: modelData.label
-              color: Color.menu.text
-              font.pixelSize: 10
-              font.bold: true
-            }
-            MouseArea {
-              id: presetArea
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.applyPreset(modelData)
-            }
-          }
-        }
-      }
-
-      // Label row: text input + emoji toggle + remove button.
-      Row {
-        visible: root.targetAddr !== ""
-        width: parent.width
-        spacing: 8
-
-        Rectangle {
-          width: parent.width - emojiBtn.width - 8 - (removeBtn.visible ? removeBtn.width + 8 : 0)
-          height: 32
-          radius: 8
-          color: Qt.darker(Color.menu.background, 1.25)
-          border.color: pickerInput.activeFocus ? Color.accent : Color.menu.border
-          border.width: 1
-
-          TextInput {
-            id: pickerInput
-            anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
-            verticalAlignment: TextInput.AlignVCenter
-            color: Color.menu.text
-            font.pixelSize: 14
-            clip: true
-            onAccepted: root.applySticker()
-            Keys.onEscapePressed: root.emojiOpen ? root.emojiOpen = false : root.close()
-          }
-        }
-
-        Rectangle {
-          id: emojiBtn
-          width: 32; height: 32; radius: 8
-          color: root.emojiOpen
-            ? Qt.lighter(Color.menu.background, 1.3)
-            : (emojiArea.containsMouse ? Qt.lighter(Color.menu.background, 1.15) : "transparent")
-          border.color: Color.menu.border
-          Text { anchors.centerIn: parent; text: "\uD83D\uDE00"; font.pixelSize: 16 }
-          MouseArea {
-            id: emojiArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.emojiOpen = !root.emojiOpen
-          }
-        }
-
-        Rectangle {
-          id: removeBtn
-          visible: root.targetAddr !== "" && root.stickers[root.targetAddr] !== undefined
-          width: visible ? removeLabel.width + 20 : 0
-          height: 32
-          radius: 8
-          color: removeArea.containsMouse
-            ? Qt.darker(Color.menu.background, 1.4)
-            : Qt.lighter(Color.menu.background, 1.15)
-          border.color: Color.menu.border
-          Text { id: removeLabel; anchors.centerIn: parent; text: "Remove"; color: "#e06c75"; font.pixelSize: 13 }
-          MouseArea {
-            id: removeArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.removeSticker()
-          }
-        }
-      }
-
-      // Emoji palette (collapsed by default).
-      Flow {
-        visible: root.pickerVisible && root.emojiOpen && root.targetAddr !== ""
-        width: parent.width
-        spacing: 4
-        Repeater {
-          model: root.emojiList
-          delegate: Rectangle {
-            required property var modelData
-            width: 30; height: 30; radius: 6
-            color: emArea.containsMouse ? Qt.lighter(Color.menu.background, 1.2) : "transparent"
-            Text { anchors.centerIn: parent; text: modelData; font.pixelSize: 16 }
-            MouseArea {
-              id: emArea
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.insertEmoji(modelData)
-            }
-          }
-        }
-      }
-
-      // Color row.
-      Row {
-        visible: root.targetAddr !== ""
-        spacing: 8
-        Text {
-          text: "COLOR"
-          color: Color.menu.text; opacity: 0.45
-          font.pixelSize: 9; font.bold: true
-          anchors.verticalCenter: parent.verticalCenter
-        }
-        Repeater {
-          model: root.palette
-          delegate: Rectangle {
-            required property var modelData
-            width: 22; height: 22; radius: 11
-            anchors.verticalCenter: parent.verticalCenter
-            color: root.resolveColor(modelData)
-            border.width: root.selectedColor === modelData ? 2 : 1
-            border.color: root.selectedColor === modelData
-              ? Color.menu.text : Qt.darker(root.resolveColor(modelData), 1.25)
-            scale: swatchArea.containsMouse ? 1.18 : 1.0
-            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
-            MouseArea {
-              id: swatchArea
-              anchors.fill: parent; hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.selectedColor = modelData
-            }
-          }
-        }
-      }
-
-      // Style row.
-      Row {
-        visible: root.targetAddr !== ""
-        spacing: 8
-        Text {
-          text: "STYLE"
-          color: Color.menu.text; opacity: 0.45
-          font.pixelSize: 9; font.bold: true
-          anchors.verticalCenter: parent.verticalCenter
-        }
-        Repeater {
-          model: root.styleModel
-          delegate: Rectangle {
-            required property var modelData
-            width: 52; height: 36; radius: 8
-            anchors.verticalCenter: parent.verticalCenter
-            color: styleArea.containsMouse ? Qt.lighter(Color.menu.background, 1.15) : "transparent"
-            border.width: root.selectedStyle === modelData.id ? 2 : 1
-            border.color: root.selectedStyle === modelData.id ? Color.accent : Color.menu.border
-
-            StickerArt {
-              anchors { fill: parent; margins: 4 }
-              stickerText: ""
-              bandColor: root.resolveColor(root.selectedColor)
-              stickerStyle: modelData.id
-              corner: "tr"
-            }
-            MouseArea {
-              id: styleArea
-              anchors.fill: parent; hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.selectedStyle = modelData.id
-            }
-          }
-        }
-      }
-
-      // Corner row + glow toggle.
-      Row {
-        visible: root.targetAddr !== ""
-        spacing: 8
-        Text {
-          text: "CORNER"
-          color: Color.menu.text; opacity: 0.45
-          font.pixelSize: 9; font.bold: true
-          anchors.verticalCenter: parent.verticalCenter
-        }
-        Repeater {
-          model: root.cornerModel
-          delegate: Rectangle {
-            required property var modelData
-            width: 46; height: 34; radius: 8
-            anchors.verticalCenter: parent.verticalCenter
-            color: cornerArea.containsMouse ? Qt.lighter(Color.menu.background, 1.15) : "transparent"
-            border.width: root.selectedCorner === modelData.id ? 2 : 1
-            border.color: root.selectedCorner === modelData.id ? Color.accent : Color.menu.border
-
-            Rectangle {
-              id: mini
-              anchors.centerIn: parent
-              width: 32; height: 22; radius: 2
-              color: "transparent"
-              border.color: Qt.tint(Color.menu.text, "#40000000")
-              border.width: 1
-              clip: true
-              Rectangle {
-                width: 13; height: 13; rotation: 45
-                color: root.resolveColor(root.selectedColor)
-                x: modelData.id === "tl" || modelData.id === "bl" ? -6.5 : mini.width - 6.5
-                y: modelData.id === "tl" || modelData.id === "tr" ? -6.5 : mini.height - 6.5
-              }
-            }
-            MouseArea {
-              id: cornerArea
-              anchors.fill: parent; hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.selectedCorner = modelData.id
-            }
-          }
-        }
-
-        Rectangle {
-          anchors.verticalCenter: parent.verticalCenter
-          width: 60; height: 24; radius: 12
-          color: root.selectedGlow
-            ? Qt.lighter(Color.menu.background, 1.3)
-            : Qt.darker(Color.menu.background, 1.1)
-          border.color: root.selectedGlow ? Color.accent : Color.menu.border
+        // ---- header
+        Column {
+          width: parent.width
+          spacing: Style.spacing.xxs
           Text {
-            anchors.centerIn: parent
-            text: "glow"
-            color: Color.menu.text
-            opacity: root.selectedGlow ? 1 : 0.6
-            font.pixelSize: 10
+            text: "Window sticker"
+            color: picker.fg
+            font.family: Style.font.family
+            font.pixelSize: Style.font.title
             font.bold: true
           }
-          MouseArea {
-            anchors.fill: parent; hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.selectedGlow = !root.selectedGlow
-          }
-        }
-      }
-
-      // Rule button.
-      Row {
-        visible: root.targetAddr !== ""
-        spacing: 8
-        Rectangle {
-          width: ruleLabel.width + 20; height: 24; radius: 12
-          color: ruleArea.containsMouse
-            ? Qt.lighter(Color.menu.background, 1.2)
-            : Qt.darker(Color.menu.background, 1.1)
-          border.color: Color.menu.border
           Text {
-            id: ruleLabel
+            width: parent.width
+            elide: Text.ElideMiddle
+            text: root.targetLabel || "No focused window \u2014 overview only"
+            color: Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+        }
+
+        // ---- live preview: the real window via screencopy, sticker on top
+        Rectangle {
+          id: previewBox
+          visible: root.targetAddr !== ""
+          width: parent.width
+          height: Style.space(170)
+          radius: Style.cornerRadius
+          color: Util.alpha(picker.fg, 0.04)
+          clip: true
+
+          readonly property var targetToplevel: {
+            var tls = Hyprland.toplevels.values
+            for (var i = 0; i < tls.length; i++)
+              if (root.normalizeAddr(tls[i].address) === root.targetAddr) return tls[i]
+            return null
+          }
+          readonly property real winAspect: {
+            var c = root.targetClient
+            return c && c.size && c.size[1] > 0 ? c.size[0] / c.size[1] : 16 / 9
+          }
+
+          Rectangle {
             anchors.centerIn: parent
-            text: "+ Save as rule for " + (root.targetClass || "class")
-            color: Color.menu.text
-            opacity: 0.75
-            font.pixelSize: 10
+            width: Math.min(parent.width - Style.spacing.xxl * 2,
+              (parent.height - Style.spacing.xxl * 2) * previewBox.winAspect)
+            height: width / previewBox.winAspect
+            radius: Style.cornerRadius
+            color: Util.alpha(picker.fg, 0.06)
+            border.width: 1
+            border.color: Util.alpha(picker.fg, 0.15)
+            clip: true
+
+            ScreencopyView {
+              id: liveCapture
+              anchors.fill: parent
+              captureSource: previewBox.targetToplevel ? previewBox.targetToplevel.wayland : null
+              live: root.pickerVisible
+              paintCursor: false
+            }
+
+            StickerArt {
+              // Real stickers are 110px on a full-size window; keep the same
+              // proportion in the scaled-down preview.
+              readonly property real ratio: root.targetClient && root.targetClient.size
+                ? parent.width / Math.max(1, root.targetClient.size[0]) : 0.25
+              width: Math.max(Style.space(40), root.cornerSize * ratio * 2.2)
+              height: width
+              x: root.selectedCorner === "tl" || root.selectedCorner === "bl" ? 0 : parent.width - width
+              y: root.selectedCorner === "tl" || root.selectedCorner === "tr" ? 0 : parent.height - height
+              stickerText: pickerInput.text || "Preview"
+              bandColor: root.resolveColor(root.selectedColor)
+              stickerStyle: root.selectedStyle
+              corner: root.selectedCorner
+            }
           }
-          MouseArea {
-            id: ruleArea
-            anchors.fill: parent; hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.addRuleFromCurrent()
+        }
+
+        // ---- label
+        Column {
+          visible: root.targetAddr !== ""
+          width: parent.width
+          spacing: Style.spacing.md
+
+          PanelSectionHeader { text: "LABEL" }
+
+          RowLayout {
+            width: parent.width
+            spacing: Style.spacing.md
+
+            TextField {
+              id: pickerInput
+              Layout.fillWidth: true
+              placeholderText: "e.g. Project X"
+              onAccepted: root.applySticker()
+              Keys.onEscapePressed: root.emojiOpen ? root.emojiOpen = false : root.close()
+            }
+            Button {
+              bordered: true
+              selected: root.emojiOpen
+              text: "\uD83D\uDE00"
+              tooltipText: "Insert emoji"
+              onClicked: root.emojiOpen = !root.emojiOpen
+            }
+            Button {
+              visible: root.stickers[root.targetAddr] !== undefined
+              bordered: true
+              text: "Remove"
+              foreground: Color.urgent
+              onClicked: root.removeSticker()
+            }
+          }
+
+          Flow {
+            visible: root.emojiOpen
+            width: parent.width
+            spacing: Style.spacing.xs
+            Repeater {
+              model: root.emojiList
+              delegate: Button {
+                required property var modelData
+                text: modelData
+                fontSize: Style.font.heading
+                onClicked: root.insertEmoji(modelData)
+              }
+            }
+          }
+
+          Flow {
+            width: parent.width
+            spacing: Style.spacing.sm
+            Repeater {
+              model: root.presets
+              delegate: Button {
+                required property var modelData
+                bordered: true
+                text: modelData.label
+                fontSize: Style.font.caption
+                foreground: root.resolveColor(modelData.color)
+                selected: pickerInput.text === modelData.text
+                  && root.selectedStyle === modelData.style
+                  && root.selectedColor === modelData.color
+                tooltipText: "\u201c" + modelData.text + "\u201d \u00b7 " + modelData.style
+                onClicked: root.applyPreset(modelData)
+              }
+            }
           }
         }
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: root.rules.length > 0 ? root.rules.length + " rule(s) active" : ""
-          color: Color.menu.text; opacity: 0.4
-          font.pixelSize: 9
-        }
-      }
 
-      // Overview: existing stickers.
-      Column {
-        width: parent.width
-        spacing: 4
-        visible: Object.keys(root.stickers).length > 0
+        // ---- look
+        Column {
+          visible: root.targetAddr !== ""
+          width: parent.width
+          spacing: Style.spacing.md
 
-        Text {
-          text: "STICKERED WINDOWS"
-          color: Color.menu.text; opacity: 0.45
-          font.pixelSize: 9; font.bold: true
-        }
+          PanelSectionHeader { text: "LOOK" }
 
-        Repeater {
-          model: {
-            var out = []
-            var keys = Object.keys(root.stickers)
-            for (var i = 0; i < keys.length; i++) {
-              var addr = keys[i]
-              var st = root.stickers[addr]
-              var cls = ""
-              var title = ""
-              for (var j = 0; j < root.lastClients.length; j++) {
-                if (root.lastClients[j].address === addr) {
-                  cls = classOf(root.lastClients[j])
-                  title = String(root.lastClients[j].title || "")
-                  break
+          GridLayout {
+            width: parent.width
+            columns: 2
+            columnSpacing: Style.spacing.xxl
+            rowSpacing: Style.spacing.lg
+
+            RowLabel { text: "Color" }
+            Flow {
+              Layout.fillWidth: true
+              spacing: Style.spacing.md
+              Repeater {
+                model: root.palette
+                delegate: Rectangle {
+                  required property var modelData
+                  readonly property bool picked: root.selectedColor === modelData
+                  width: Style.space(22); height: width; radius: width / 2
+                  color: "transparent"
+                  border.width: picked ? Math.max(2, Style.space(2)) : 0
+                  border.color: picker.fg
+                  Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width - Style.space(6); height: width; radius: width / 2
+                    color: root.resolveColor(parent.modelData)
+                    scale: swatchArea.containsMouse && !parent.picked ? 1.15 : 1
+                    Behavior on scale { NumberAnimation { duration: 90 } }
+                  }
+                  MouseArea {
+                    id: swatchArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.selectedColor = parent.modelData
+                  }
                 }
               }
-              out.push({ addr: addr, st: st, cls: cls, title: title })
             }
-            return out
-          }
-          delegate: Rectangle {
-            required property var modelData
-            width: pickerCol.width
-            height: 36; radius: 6
-            color: rowArea.containsMouse
-              ? Qt.lighter(Color.menu.background, 1.1) : "transparent"
 
-            Rectangle {
-              id: thumb
-              anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 4 }
-              width: 48; height: 30; radius: 3
-              color: Qt.darker(Color.menu.background, 1.3)
-              clip: true
-              StickerArt {
-                anchors.fill: parent
-                stickerText: ""
-                bandColor: root.resolveColor(modelData.st.color || "accent")
-                stickerStyle: modelData.st.style || "banner"
-                corner: modelData.st.corner || "tr"
+            RowLabel { text: "Style" }
+            Flow {
+              Layout.fillWidth: true
+              spacing: Style.spacing.md
+              Repeater {
+                model: root.styleModel
+                delegate: Tile {
+                  required property var modelData
+                  width: Style.space(58); height: Style.space(44)
+                  selected: root.selectedStyle === modelData.id
+                  onClicked: root.selectedStyle = modelData.id
+                  StickerArt {
+                    anchors { fill: parent; margins: Style.spacing.xs; bottomMargin: Style.space(12) }
+                    bandColor: root.resolveColor(root.selectedColor)
+                    stickerStyle: parent.modelData.id
+                    corner: "tr"
+                  }
+                  Text {
+                    anchors { bottom: parent.bottom; bottomMargin: Style.spacing.xxs; horizontalCenter: parent.horizontalCenter }
+                    text: parent.modelData.label
+                    color: parent.selected ? picker.fg : Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption - 1
+                  }
+                }
               }
             }
 
-            Column {
-              anchors { left: thumb.right; right: rmBtn.left; verticalCenter: parent.verticalCenter; leftMargin: 8; rightMargin: 8 }
-              spacing: 1
+            RowLabel { text: "Corner" }
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.spacing.md
+              Repeater {
+                model: root.cornerModel
+                delegate: Tile {
+                  id: cornerTile
+                  required property var modelData
+                  width: Style.space(46); height: Style.space(34)
+                  selected: root.selectedCorner === modelData.id
+                  onClicked: root.selectedCorner = modelData.id
+                  Rectangle {
+                    id: mini
+                    anchors.centerIn: parent
+                    width: Style.space(30); height: Style.space(20)
+                    radius: Math.min(Style.cornerRadius, Style.space(3))
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Util.alpha(picker.fg, 0.4)
+                    clip: true
+                    Rectangle {
+                      width: Style.space(12); height: width; rotation: 45
+                      color: root.resolveColor(root.selectedColor)
+                      x: cornerTile.modelData.id === "tl" || cornerTile.modelData.id === "bl" ? -width / 2 : mini.width - width / 2
+                      y: cornerTile.modelData.id === "tl" || cornerTile.modelData.id === "tr" ? -height / 2 : mini.height - height / 2
+                    }
+                  }
+                }
+              }
+              Item { Layout.fillWidth: true }
               Text {
-                width: parent.width
-                text: (modelData.cls || "?") + "  \u2014  \"" + (modelData.st.text || "") + "\""
-                color: Color.menu.text
-                font.pixelSize: 11
-                elide: Text.ElideRight
+                text: "Glow"
+                color: Color.muted
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
               }
-              Text {
-                width: parent.width
-                text: modelData.title
-                color: Color.menu.text; opacity: 0.5
-                font.pixelSize: 9
-                elide: Text.ElideRight
+              ToggleSwitch {
+                checked: root.selectedGlow
+                onToggled: root.selectedGlow = !root.selectedGlow
               }
-            }
-
-            Rectangle {
-              id: rmBtn
-              anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: 4 }
-              width: 22; height: 22; radius: 11
-              color: rmArea.containsMouse ? "#e06c75" : "transparent"
-              Text { anchors.centerIn: parent; text: "\u00d7"; color: Color.menu.text; font.pixelSize: 14 }
-              MouseArea {
-                id: rmArea
-                anchors.fill: parent; hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.removeStickerFor(modelData.addr)
-              }
-            }
-
-            MouseArea {
-              id: rowArea
-              anchors { left: parent.left; right: rmBtn.left; top: parent.top; bottom: parent.bottom }
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.focusWindow(modelData.addr)
             }
           }
         }
+
+        Button {
+          visible: root.targetAddr !== ""
+          anchors.right: parent.right
+          bordered: true
+          selected: pickerInput.text.trim() !== ""
+          enabled: pickerInput.text.trim() !== ""
+          opacity: enabled ? 1 : 0.4
+          text: root.stickers[root.targetAddr] !== undefined ? "Update sticker  \u21b5" : "Stick it  \u21b5"
+          onClicked: root.applySticker()
+        }
+
+        PanelSeparator { width: parent.width }
+
+      RulesEditor {
+        id: rulesEditor
+        width: parent.width
+        rules: root.rules
+        clients: root.lastClients
+        stickers: root.stickers
+        target: root.targetClient
+        canEdit: root.targetAddr !== ""
+        label: pickerInput.text
+        stickerColor: root.selectedColor
+        stickerStyle: root.selectedStyle
+        corner: root.selectedCorner
+        glow: root.selectedGlow
+        resolveColor: root.resolveColor
+        onCommit: function(index, rule) { root.commitRule(index, rule) }
+        onRemoveRule: function(index) { root.removeRule(index) }
+        onMoveRule: function(index, delta) { root.moveRule(index, delta) }
+        onSetRuleEnabled: function(index, enabled) { root.setRuleEnabled(index, enabled) }
+        onLoadLook: function(rule) { root.loadRuleLook(rule) }
+      onDraftingChanged: if (drafting) Qt.callLater(function() {
+        pickerScroll.contentY = Math.max(0, Math.min(rulesEditor.y,
+          pickerScroll.contentHeight - pickerScroll.height))
+      })
       }
 
-      Text {
-        text: root.targetAddr !== ""
-          ? "Enter apply \u00b7 Esc cancel \u00b7 click a row to focus that window"
-          : "Click a row to focus that window \u00b7 Esc to close"
-        color: Color.menu.text; opacity: 0.4
-        font.pixelSize: 10
+        // ---- stickered windows
+        Column {
+          width: parent.width
+          spacing: Style.spacing.sm
+          visible: Object.keys(root.stickers).length > 0
+
+          PanelSectionHeader { text: "STICKERED WINDOWS" }
+
+          Repeater {
+            model: {
+              var out = []
+              var keys = Object.keys(root.stickers)
+              for (var i = 0; i < keys.length; i++) {
+                var addr = keys[i]
+                var c = null
+                for (var j = 0; j < root.lastClients.length; j++)
+                  if (root.lastClients[j].address === addr) { c = root.lastClients[j]; break }
+                out.push({ addr: addr, st: root.stickers[addr], cls: classOf(c), title: c ? String(c.title || "") : "" })
+              }
+              return out
+            }
+            delegate: Rectangle {
+              id: stRow
+              required property var modelData
+              width: pickerCol.width
+              height: stLayout.implicitHeight + Style.spacing.md * 2
+              radius: Style.cornerRadius
+              color: stArea.containsMouse ? Style.hoverFillFor(picker.fg, Color.accent) : "transparent"
+
+              MouseArea {
+                id: stArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.focusWindow(stRow.modelData.addr)
+              }
+
+              RowLayout {
+                id: stLayout
+                anchors { fill: parent; margins: Style.spacing.md }
+                spacing: Style.spacing.lg
+
+                Rectangle {
+                  Layout.preferredWidth: Style.space(46)
+                  Layout.preferredHeight: Style.space(30)
+                  radius: Style.cornerRadius
+                  color: Util.alpha(picker.fg, 0.06)
+                  clip: true
+                  StickerArt {
+                    anchors.fill: parent
+                    bandColor: root.resolveColor(stRow.modelData.st.color || "accent")
+                    stickerStyle: stRow.modelData.st.style || "banner"
+                    corner: stRow.modelData.st.corner || "tr"
+                  }
+                }
+                Column {
+                  Layout.fillWidth: true
+                  spacing: Style.spacing.xxs
+                  Text {
+                    width: parent.width
+                    elide: Text.ElideRight
+                    text: stRow.modelData.st.text || ""
+                    color: picker.fg
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    font.bold: true
+                  }
+                  Text {
+                    width: parent.width
+                    elide: Text.ElideRight
+                    text: (stRow.modelData.cls || "?") + (stRow.modelData.title ? " \u00b7 " + stRow.modelData.title : "")
+                    color: Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+                Button {
+                  text: "\u00d7"
+                  fontSize: Style.font.subtitle
+                  tooltipText: "Remove sticker"
+                  onClicked: root.removeStickerFor(stRow.modelData.addr)
+                }
+              }
+            }
+          }
+        }
+
+        Text {
+          width: parent.width
+          wrapMode: Text.Wrap
+          text: root.targetAddr !== ""
+            ? "Enter sticks it \u00b7 Esc closes \u00b7 click a stickered window to jump to it"
+            : "Click a stickered window to jump to it \u00b7 Esc closes"
+          color: Color.muted
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
       }
     }
   }

@@ -18,6 +18,26 @@ fullscreen, and disappears when the window closes.
 Re-applying the shortcut on a window that already has a sticker opens the
 picker with the current text prefilled.
 
+## Rules
+
+Rules sticker windows automatically, e.g. every kitty whose title has
+`prod`. In the picker under **Rules**, click **+ New rule** (or a rule
+row to edit it):
+
+- **App** and **Window title** conditions, each `is` / `has` / `starts` /
+  `regex`. Regex errors are shown inline.
+- **Suggestions** derived from the focused window: app name, the folder
+  or repo in the title, the site, title segments.
+- **Live matches**: which open windows the rule would sticker, which keep
+  their own sticker, and which an earlier rule already claims. Very broad
+  rules get a warning.
+- The look (label, color, style, corner, glow) comes from the composer.
+
+The list shows what each rule currently does ("on 3 open windows",
+"never applies — rule 1 wins"), with priority arrows (first match wins),
+a pause toggle, and delete. A window's own sticker always beats rules.
+Rules live in `~/.local/state/omarchy-window-sticker/rules.json`.
+
 ## How it works
 
 - Omarchy shell plugin (`keepLoaded` overlay). The picker captures the

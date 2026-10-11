@@ -19,8 +19,8 @@ Item {
   readonly property real cut: 48 * scale2
   readonly property real bandT: 22 * scale2
 
-  readonly property real cpx: corner === "tl" || corner === "bl" ? 0 : sz
-  readonly property real cpy: corner === "tl" || corner === "tr" ? 0 : sz
+  readonly property real cpx: corner === "tl" || corner === "bl" ? 0 : width
+  readonly property real cpy: corner === "tl" || corner === "tr" ? 0 : height
   readonly property real inx: corner === "tl" || corner === "bl" ? 1 : -1
   readonly property real iny: corner === "tl" || corner === "tr" ? 1 : -1
 
@@ -81,8 +81,8 @@ Item {
     width: 64 * art.scale2
     height: 28 * art.scale2
     readonly property bool flipped: art.corner === "bl" || art.corner === "br"
-    x: art.corner === "tl" || art.corner === "bl" ? 0 : art.sz - width
-    y: flipped ? art.sz - height : 0
+    x: art.corner === "tl" || art.corner === "bl" ? 0 : art.width - width
+    y: flipped ? art.height - height : 0
     antialiasing: true
 
     ShapePath {
