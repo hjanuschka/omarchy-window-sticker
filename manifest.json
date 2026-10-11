@@ -2,15 +2,25 @@
   "schemaVersion": 1,
   "id": "io.github.hjanuschka.window-sticker",
   "name": "Window Sticker",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Helmut Januschka",
   "license": "MIT",
-  "description": "Book-ribbon project labels pinned to window corners. Super+Shift+R, type a label, boom.",
+  "description": "Pin a labelled sticker (banner, flag, wax seal, washi tape, luggage tag) to any Hyprland window. Super+Shift+R to compose, auto-sticker by class/title rules, overview of stickered windows, optional bar widget.",
   "kinds": [
-    "overlay"
+    "overlay",
+    "bar-widget"
   ],
   "entryPoints": {
-    "overlay": "StickerOverlay.qml"
+    "overlay": "StickerOverlay.qml",
+    "barWidget": "BarWidget.qml"
   },
-  "keepLoaded": true
+  "keepLoaded": true,
+  "barWidget": {
+    "displayName": "Window Sticker",
+    "description": "Count of stickered windows; click for the overview.",
+    "category": "Productivity",
+    "defaultSection": "right",
+    "allowMultiple": false
+  },
+  "homepage": "https://github.com/hjanuschka/omarchy-window-sticker"
 }
