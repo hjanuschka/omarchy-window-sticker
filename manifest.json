@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.hjanuschka.window-sticker",
+  "name": "Window Sticker",
+  "version": "0.1.0",
+  "author": "Helmut Januschka",
+  "license": "MIT",
+  "description": "Book-ribbon project labels pinned to window corners. Super+Shift+R, type a label, boom.",
+  "kinds": [
+    "overlay"
+  ],
+  "entryPoints": {
+    "overlay": "StickerOverlay.qml"
+  },
+  "keepLoaded": true
+}
