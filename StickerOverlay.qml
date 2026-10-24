@@ -6,7 +6,9 @@ import Quickshell.Hyprland
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
+import QtQuick.Effects
 import "RuleLogic.js" as RL
+import "Stacking.js" as Stacking
 
 // Sticker overlays for Hyprland windows. Each sticker is a small layer
 // surface pinned to one corner of its target window and rendered by
@@ -86,6 +88,18 @@ Item {
 
   function resolveColor(c) {
     return c === "accent" ? String(Color.accent) : c
+  }
+
+  property int borderSize: 0
+
+  Process {
+    running: true
+    command: ["hyprctl", "getoption", "general:border_size", "-j"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try { root.borderSize = JSON.parse(text).int || 0 } catch (e) {}
+      }
+    }
   }
 
   Component.onCompleted: {
@@ -205,29 +219,17 @@ Item {
     }
     root.lastClients = clients
 
-    var activeWsByMonId = {}
-    var specialWsByMonId = {}
-    var reservedTopByMonId = {}
+    var monById = {}
     for (var m = 0; m < monitors.length; m++) {
-      activeWsByMonId[String(monitors[m].id)] =
-        monitors[m].activeWorkspace ? String(monitors[m].activeWorkspace.name || "") : ""
-      specialWsByMonId[String(monitors[m].id)] =
-        monitors[m].specialWorkspace ? String(monitors[m].specialWorkspace.name || "") : ""
-      var res = monitors[m].reserved || [0, 0, 0, 0]
-      reservedTopByMonId[String(monitors[m].id)] = res[1] || 0
-    }
-
-    var screensaverActive = false
-    var fullscreenByMonId = {}
-    for (var ci = 0; ci < clients.length; ci++) {
-      var cc = clients[ci]
-      if (cc.hidden === 1 || cc.hidden === true) continue
-      if (/screensaver|hyprlock|lockscreen|slock/i.test(classOf(cc))) {
-        screensaverActive = true
-        continue
+      var mo = monitors[m]
+      monById[String(mo.id)] = {
+        name: String(mo.name || ""),
+        x: mo.x || 0,
+        y: mo.y || 0,
+        reservedTop: (mo.reserved || [0, 0, 0, 0])[1] || 0,
+        activeWs: mo.activeWorkspace ? String(mo.activeWorkspace.name || "") : "",
+        specialWs: mo.specialWorkspace ? String(mo.specialWorkspace.name || "") : ""
       }
-      if (cc.fullscreen === 1)
-        fullscreenByMonId[String(cc.monitor)] = cc.address
     }
 
     // Build the effective sticker set: explicit stickers plus rule matches
@@ -254,21 +256,21 @@ Item {
         if (clients[ii].address === sa) { cc2 = clients[ii]; break }
       if (!cc2) continue
 
+      var mon = monById[String(cc2.monitor)]
       var at = cc2.at || [0, 0]
       var size = cc2.size || [0, 0]
-      var monId = String(cc2.monitor)
-      var wsName = cc2.workspace ? String(cc2.workspace.name || "") : ""
-      var hidden = cc2.hidden === 1 || cc2.hidden === true
-      var pinned = cc2.pinned === 1 || cc2.pinned === true
-      var covered = fullscreenByMonId[monId] !== undefined
-        && fullscreenByMonId[monId] !== sa
-      var visible = !hidden && !screensaverActive && !covered
-        && (wsName === activeWsByMonId[monId]
-            || wsName === specialWsByMonId[monId]
-            || pinned)
+      var corner = st.corner || "tr"
+      var box = {
+        x: corner === "tl" || corner === "bl" ? at[0] : at[0] + size[0] - S,
+        y: corner === "tl" || corner === "tr" ? at[1] : at[1] + size[1] - S,
+        w: S, h: S
+      }
+      var occ = Stacking.isVisible(cc2, mon)
+        ? Stacking.occlusion(cc2, clients, monById, box, root.borderSize)
+        : { full: true, holes: [] }
 
       var win = root.ribbonWins[sa]
-      if (!visible) {
+      if (occ.full) {
         if (win) win.visible = false
         continue
       }
@@ -277,17 +279,12 @@ Item {
         win = ribbonWin.createObject(root)
         root.ribbonWins[sa] = win
       }
-      var monName = ""
-      for (var mi = 0; mi < monitors.length; mi++)
-        if (String(monitors[mi].id) === monId) { monName = String(monitors[mi].name || ""); break }
-      var scr = screenByName(monName)
+      var scr = screenByName(mon.name)
       if (scr && win.screen !== scr) win.screen = scr
 
-      var corner = st.corner || "tr"
-      var tx = corner === "tl" || corner === "bl" ? at[0] : at[0] + size[0] - S
-      var ty = corner === "tl" || corner === "tr" ? at[1] : at[1] + size[1] - S
-      win.targetX = tx
-      win.targetY = ty - (reservedTopByMonId[monId] || 0)
+      win.targetX = box.x - mon.x
+      win.targetY = box.y - mon.y - mon.reservedTop
+      win.holes = occ.holes
       win.corner = corner
       win.sstyle = st.style || "banner"
       win.bandColor = root.resolveColor(st.color || "accent")
@@ -313,6 +310,8 @@ Item {
       property bool glow: false
       property real targetX: 0
       property real targetY: 0
+      // Parts of the sticker covered by windows stacked above its window.
+      property var holes: []
 
       WlrLayershell.namespace: "omarchy-window-sticker"
       WlrLayershell.layer: WlrLayer.Overlay
@@ -335,6 +334,13 @@ Item {
           if (h === Item.Right && v === Item.Top) return Item.TopRight
           if (h === Item.Left && v === Item.Bottom) return Item.BottomLeft
           return Item.BottomRight
+        }
+
+        layer.enabled: rib.holes.length > 0
+        layer.effect: MultiEffect {
+          maskEnabled: true
+          maskInverted: true
+          maskSource: holeMask
         }
 
         // optional shadow pass
@@ -363,6 +369,22 @@ Item {
           running: false
           NumberAnimation { from: 1.35; to: 0.94; duration: 110; easing.type: Easing.OutQuad }
           NumberAnimation { to: 1.0; duration: 90; easing.type: Easing.OutBack }
+        }
+      }
+
+      Item {
+        id: holeMask
+        anchors.fill: parent
+        visible: false
+        layer.enabled: true
+        Repeater {
+          model: rib.holes
+          Rectangle {
+            required property var modelData
+            x: modelData.x; y: modelData.y
+            width: modelData.w; height: modelData.h
+            color: "black"
+          }
         }
       }
 

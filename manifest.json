@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.hjanuschka.window-sticker",
   "name": "Window Sticker",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "author": "Helmut Januschka",
   "license": "MIT",
   "description": "Pin a labelled sticker (banner, flag, wax seal, washi tape, luggage tag) to any Hyprland window. Super+Shift+R to compose, auto-sticker by class/title rules, overview of stickered windows, optional bar widget.",

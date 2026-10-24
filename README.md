@@ -5,9 +5,11 @@ a diagonal banner, bookmark flag, wax seal, washi tape or luggage tag in
 the corner of your choice. Mark windows like "Project X", "PROD" or
 "DO NOT CLOSE" and tell them apart at a glance.
 
-Stickers follow their window, hide when it is minimized, on another
-workspace, behind the screensaver or covered by a fullscreen app, and
-disappear when the window closes.
+Stickers follow their window and stay *under* anything drawn above it:
+another fullscreen app, the screensaver, a shown special workspace, or a
+floating window on top (partly covered stickers are clipped). They hide
+when the window is minimized or on another workspace, and disappear when
+it closes.
 
 ![Five windows with a banner, flag, wax seal, washi tape and luggage tag sticker](docs/hero.png)
 
@@ -113,7 +115,8 @@ rm -r ~/.local/state/omarchy-window-sticker   # optional: drop stickers and rule
   namespace) pinned to a corner of its window; only the sticker area is
   ever covered.
 - A 120 ms sync loop, woken early by Hyprland events, re-reads
-  `hyprctl clients` / `monitors` and moves or hides stickers. It only runs
+  `hyprctl clients` / `monitors`, moves stickers, and masks out whatever
+  windows stacked above the sticker's window cover (`Stacking.js`). It only runs
   while stickers or rules exist, or the picker is open.
 - The preview uses Quickshell's `ScreencopyView` on the target window.
 
