@@ -275,8 +275,14 @@ Item {
         continue
       }
       seen[sa] = true
+      var overFullscreen = cc2.fullscreen === 2
+      // A mapped layer surface can't move between layers.
+      if (win && win.overFullscreen !== overFullscreen) {
+        win.destroy()
+        win = null
+      }
       if (!win) {
-        win = ribbonWin.createObject(root)
+        win = ribbonWin.createObject(root, { overFullscreen: overFullscreen })
         root.ribbonWins[sa] = win
       }
       var scr = screenByName(mon.name)
@@ -312,9 +318,12 @@ Item {
       property real targetY: 0
       // Parts of the sticker covered by windows stacked above its window.
       property var holes: []
+      property bool overFullscreen: false
 
       WlrLayershell.namespace: "omarchy-window-sticker"
-      WlrLayershell.layer: WlrLayer.Overlay
+      // Top keeps notifications and other overlays above the sticker, but
+      // Hyprland draws fullscreen windows over Top.
+      WlrLayershell.layer: overFullscreen ? WlrLayer.Overlay : WlrLayer.Top
       WlrLayershell.exclusiveZone: 0
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
